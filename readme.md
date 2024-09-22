@@ -4,7 +4,7 @@ api-cache is a reusable Go package for managing Redis cache for HTTP routes.
 
 ## Installation
 
-Ensure you replace `path/to/your/module/apicache` with your actual import path.
+Ensure you replace `github.com/Chahine-tech/api-cache` with your actual import path.
 
 ## Usage
 
@@ -14,7 +14,7 @@ import (
     "log"
     "net/http"
     "time"
-    "path/to/your/module/apicache" // Update with the actual path of your module
+    "github.com/Chahine-tech/api-cache" // Update with the actual path of your module
 )
 
 func main() {
