@@ -14,7 +14,7 @@ import (
     "log"
     "net/http"
     "time"
-    "github.com/Chahine-tech/api-cache" // Update with the actual path of your module
+    "github.com/Chahine-tech/api-cache"
 )
 
 func main() {
