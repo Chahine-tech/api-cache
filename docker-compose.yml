@@ -1,0 +1,15 @@
+version: '3'
+services:
+  redis:
+    image: redis:7.0-alpine          # Official Redis image from DockerHub
+    container_name: api_cache_redis   # Name of the Redis container
+    ports:
+      - "6379:6379"                  # Exposing port 6379 for Redis
+    volumes:
+      - ./data/redis:/data            # Mounting local volume to persist Redis data
+    networks:
+      - api_cache_network
+
+networks:
+  api_cache_network:
+    driver: bridge
