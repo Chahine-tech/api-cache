@@ -1,8 +1,6 @@
 package apicache
 
-import (
-	"github.com/go-redis/redis/v8"
-)
+import "github.com/go-redis/redis/v8"
 
 // NewRedisClient creates a new Redis client
 func NewRedisClient(addr, password string, db int) *redis.Client {

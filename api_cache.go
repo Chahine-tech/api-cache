@@ -44,8 +44,13 @@ func (c *ApiCache) GetCache(req *http.Request) (interface{}, error) {
 		return nil, err
 	}
 
+	decompressedData, err := decompress(data)
+	if err != nil {
+		return nil, err
+	}
+
 	var result interface{}
-	if err := msgpack.Unmarshal(data, &result); err != nil {
+	if err := msgpack.Unmarshal(decompressedData, &result); err != nil {
 		return nil, err
 	}
 
@@ -53,20 +58,45 @@ func (c *ApiCache) GetCache(req *http.Request) (interface{}, error) {
 }
 
 // SetCache stores data in the cache for a given request
-func (c *ApiCache) SetCache(req *http.Request, data interface{}, ttl time.Duration) (bool, error) {
+func (c *ApiCache) SetCache(req *http.Request, data interface{}) (bool, error) {
 	key := buildKey(req, c.config.Prefix)
 	packedData, err := msgpack.Marshal(data)
 	if err != nil {
 		return false, err
 	}
 
-	encodedData := base64.StdEncoding.EncodeToString(packedData)
+	compressedData, err := compress(packedData)
+	if err != nil {
+		return false, err
+	}
+
+	encodedData := base64.StdEncoding.EncodeToString(compressedData)
+	ttl := c.getTTL(req)
 	status, err := c.redisClient.Set(context.Background(), key, encodedData, ttl).Result()
 	if err != nil {
 		return false, err
 	}
 
 	return status == "OK", nil
+}
+
+// InvalidateCache invalidates the cache for a given request
+func (c *ApiCache) InvalidateCache(req *http.Request) (bool, error) {
+	key := buildKey(req, c.config.Prefix)
+	count, err := c.redisClient.Del(context.Background(), key).Result()
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (c *ApiCache) getTTL(req *http.Request) time.Duration {
+	for _, ttl := range c.config.TTLs {
+		if ttl.Path == req.URL.Path && ttl.Method == req.Method {
+			return ttl.TTL
+		}
+	}
+	return c.config.Expiration
 }
 
 // buildKey generates a cache key based on the request
