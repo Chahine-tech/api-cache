@@ -17,11 +17,16 @@ type ApiCache struct {
 	config      Config
 }
 
-// NewApiCache creates a new ApiCache instance
-func NewApiCache(redisClient *redis.Client, config ...Config) *ApiCache {
+// NewApiCache creates a new ApiCache instance with optional environment-based configuration
+func NewApiCache(redisClient *redis.Client, useEnv bool, config ...Config) *ApiCache {
 	cfg := defaultConfig
 	if len(config) > 0 {
 		cfg = config[0]
+	}
+	if useEnv {
+		envConfig := LoadConfigFromEnv()
+		cfg.Expiration = envConfig.Expiration
+		cfg.Prefix = envConfig.Prefix
 	}
 	return &ApiCache{
 		redisClient: redisClient,
@@ -31,6 +36,11 @@ func NewApiCache(redisClient *redis.Client, config ...Config) *ApiCache {
 
 // GetCache retrieves data from the cache for a given request
 func (c *ApiCache) GetCache(req *http.Request) (interface{}, error) {
+	if req.Method != http.MethodGet {
+		// By default, only cache GET requests
+		return nil, nil
+	}
+
 	key := buildKey(req, c.config.Prefix)
 	rawData, err := c.redisClient.Get(context.Background(), key).Result()
 	if err == redis.Nil {
@@ -59,6 +69,11 @@ func (c *ApiCache) GetCache(req *http.Request) (interface{}, error) {
 
 // SetCache stores data in the cache for a given request
 func (c *ApiCache) SetCache(req *http.Request, data interface{}) (bool, error) {
+	if req.Method != http.MethodGet {
+		// By default, only cache GET requests
+		return false, nil
+	}
+
 	key := buildKey(req, c.config.Prefix)
 	packedData, err := msgpack.Marshal(data)
 	if err != nil {
@@ -82,14 +97,18 @@ func (c *ApiCache) SetCache(req *http.Request, data interface{}) (bool, error) {
 
 // InvalidateCache invalidates the cache for a given request
 func (c *ApiCache) InvalidateCache(req *http.Request) (bool, error) {
-	key := buildKey(req, c.config.Prefix)
-	count, err := c.redisClient.Del(context.Background(), key).Result()
-	if err != nil {
-		return false, err
+	if req.Method == http.MethodGet {
+		key := buildKey(req, c.config.Prefix)
+		count, err := c.redisClient.Del(context.Background(), key).Result()
+		if err != nil {
+			return false, err
+		}
+		return count > 0, nil
 	}
-	return count > 0, nil
+	return false, nil
 }
 
+// getTTL returns the TTL for a specific request based on the config
 func (c *ApiCache) getTTL(req *http.Request) time.Duration {
 	for _, ttl := range c.config.TTLs {
 		if ttl.Path == req.URL.Path && ttl.Method == req.Method {
