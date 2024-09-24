@@ -19,14 +19,19 @@ import (
     "net/http"
     "time"
     "github.com/Chahine-tech/api-cache"
+    "os"
 )
 
 func main() {
+    // Set environment variables for testing
+    os.Setenv("APICACHE_EXPIRATION", "3600") // 1 hour in seconds
+    os.Setenv("APICACHE_PREFIX", "myprefix:")
+
     // Create a new Redis client
     redisClient := apicache.NewRedisClient("localhost:6379", "", 0)
 
-    // Create an ApiCache instance
-    cache := apicache.NewApiCache(redisClient)
+    // Create an ApiCache instance using environment-based configuration
+    cache := apicache.NewApiCache(redisClient, true) // Use true to enable environment-based config
 
     // Example HTTP request to build the cache key
     req, _ := http.NewRequest("GET", "http://example.com/resource?id=123", nil)
@@ -54,7 +59,6 @@ func main() {
 
     // Set up an HTTP server and use CacheMiddleware
     mux := http.NewServeMux()
-
     // Use the CacheMiddleware for the /resource route
     mux.Handle("/resource", apicache.CacheMiddleware(cache, 24*time.Hour)(http.HandlerFunc(resourceHandler)))
 
