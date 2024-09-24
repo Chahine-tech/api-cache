@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -15,6 +16,7 @@ import (
 type ApiCache struct {
 	redisClient *redis.Client
 	config      Config
+	mu          sync.Mutex
 }
 
 // NewApiCache creates a new ApiCache instance with optional environment-based configuration
@@ -36,12 +38,17 @@ func NewApiCache(redisClient *redis.Client, useEnv bool, config ...Config) *ApiC
 
 // GetCache retrieves data from the cache for a given request
 func (c *ApiCache) GetCache(req *http.Request) (interface{}, error) {
+	// By default, only cache GET requests
 	if req.Method != http.MethodGet {
-		// By default, only cache GET requests
 		return nil, nil
 	}
 
 	key := buildKey(req, c.config.Prefix)
+
+	// Mutex Lock to ensure thread-safety
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	rawData, err := c.redisClient.Get(context.Background(), key).Result()
 	if err == redis.Nil {
 		return nil, nil // Cache miss
@@ -69,8 +76,13 @@ func (c *ApiCache) GetCache(req *http.Request) (interface{}, error) {
 
 // SetCache stores data in the cache for a given request
 func (c *ApiCache) SetCache(req *http.Request, data interface{}) (bool, error) {
+	// By default, only cache GET requests
 	if req.Method != http.MethodGet {
-		// By default, only cache GET requests
+		return false, nil
+	}
+
+	// Apply rate-limiting before setting cache
+	if !c.rateLimit(req) {
 		return false, nil
 	}
 
@@ -87,18 +99,31 @@ func (c *ApiCache) SetCache(req *http.Request, data interface{}) (bool, error) {
 
 	encodedData := base64.StdEncoding.EncodeToString(compressedData)
 	ttl := c.getTTL(req)
-	status, err := c.redisClient.Set(context.Background(), key, encodedData, ttl).Result()
+
+	// Mutex Lock to ensure thread-safety
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	pipeliner := c.redisClient.Pipeline()
+	pipeliner.Set(context.Background(), key, encodedData, ttl)
+	_, err = pipeliner.Exec(context.Background())
 	if err != nil {
 		return false, err
 	}
 
-	return status == "OK", nil
+	return true, nil
 }
 
 // InvalidateCache invalidates the cache for a given request
 func (c *ApiCache) InvalidateCache(req *http.Request) (bool, error) {
+	// By default, only invalidate cache for GET requests
 	if req.Method == http.MethodGet {
 		key := buildKey(req, c.config.Prefix)
+
+		// Mutex Lock to ensure thread-safety
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
 		count, err := c.redisClient.Del(context.Background(), key).Result()
 		if err != nil {
 			return false, err
@@ -106,6 +131,28 @@ func (c *ApiCache) InvalidateCache(req *http.Request) (bool, error) {
 		return count > 0, nil
 	}
 	return false, nil
+}
+
+// rateLimit applies a simple rate-limiting mechanism
+func (c *ApiCache) rateLimit(req *http.Request) bool {
+	key := buildKey(req, c.config.Prefix) + ":rate-limit"
+	limit := 10 // Allow max 10 requests per minute
+	duration := time.Minute
+
+	current, err := c.redisClient.Incr(context.Background(), key).Result()
+	if err != nil {
+		return false
+	}
+
+	if current == 1 {
+		c.redisClient.Expire(context.Background(), key, duration)
+	}
+
+	if current > int64(limit) {
+		return false
+	}
+
+	return true
 }
 
 // getTTL returns the TTL for a specific request based on the config
